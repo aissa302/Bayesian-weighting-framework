@@ -13,6 +13,8 @@ from sklearn.metrics import roc_auc_score, matthews_corrcoef
 import random
 import tensorflow as tf
 
+import kagglehub
+
 from config.experiments import EXPERIMENT_CONFIG
 from data.loaders import load_datasets, load_embeddings
 from models.architectures import create_model
@@ -43,7 +45,7 @@ class ExperimentRunner:
         self.config = config
         self.base_path = Path(config['base_path'])
         self.results = defaultdict(list)
-    
+
     def split_valid_data(self, df):
         labeles = df.Label
         text = df.Description
@@ -53,17 +55,17 @@ class ExperimentRunner:
         # Load tf-idf weights from json file
         with open(self.config['tfidf_weights_path'], 'r') as f:
             return json.load(f)
-    
+
     def load_bayesian_weights(self):
         # Load Bayesian weights from json file
         with open(self.config['bayesian_weights_path'], 'r') as f:
             return json.load(f)
-        
+
     def load_ntfidf_weights(self):
         # Load ntf-idf weights from json file
         with open(self.config['ntfidf_weights_path'], 'r') as f:
             return json.load(f)
-    
+
     def load_tfigm_weights(self):
         # Load tf-igm weights from json file
         with open(self.config['tfigm_weights_path'], 'r') as f:
@@ -74,7 +76,7 @@ class ExperimentRunner:
         exp_dir = self.base_path / technique / architecture / str(batch_size)
         exp_dir.mkdir(parents=True, exist_ok=True)
         return exp_dir
-    
+
     def create_weighted_embeddings(self, texts, labels, words_weights, model, max_len, embedding_dim, technique='none'):
         embeddings = []
         for text, label in tqdm(zip(texts, labels)):
@@ -110,7 +112,7 @@ class ExperimentRunner:
                 embedding = embedding[:max_len]  # Truncate if too long
             embeddings.append(embedding)
         return np.array(embeddings)
-    
+
     def _get_weight_matrix(self, technique):
         """Load or compute weighting matrix for technique"""
         # Implement your weighting matrix loading logic here
@@ -124,7 +126,7 @@ class ExperimentRunner:
         elif technique == 'tf-igm':
             return self.load_tfigm_weights()
         return None
-    
+
     def _create_callbacks(self, exp_dir):
         """Create training callbacks"""
         early_stop = keras.callbacks.EarlyStopping(
@@ -132,7 +134,7 @@ class ExperimentRunner:
             patience=self.config['patience'],
             restore_best_weights=True
         )
-        
+
         checkpoint = keras.callbacks.ModelCheckpoint(
             str(exp_dir / 'best_model.keras'),
             monitor='val_accuracy',
@@ -145,9 +147,9 @@ class ExperimentRunner:
             patience=3,
             min_lr=0.0001
         )
-        
+
         return [early_stop, checkpoint, reduce_lr]
-    
+
     def _evaluate_model(self, model, test_sets, exp_dir):
         """Evaluate model on all test sets and save results"""
         metrics = {}
@@ -155,16 +157,16 @@ class ExperimentRunner:
             y_pred = model.predict(X_test)
             test_metrics = self._calculate_metrics(y_test, y_pred)
             metrics[test_name] = test_metrics
-            
+
             # Save predictions
             pd.DataFrame(y_pred).to_csv(exp_dir / f'{test_name}_predictions.csv')
-        
+
         # Save metrics
         with open(exp_dir / 'metrics.json', 'w') as f:
             json.dump(metrics, f)
-            
+
         return metrics
-    
+
     def _calculate_metrics(self, y_true, y_pred):
         """Calculate evaluation metrics"""
         y_pred_labels = np.argmax(y_pred, axis=1)
@@ -176,7 +178,7 @@ class ExperimentRunner:
             'mcc': matthews_corrcoef(y_true, y_pred_labels),
             'auc_roc': roc_auc_score(y_true, y_pred, multi_class="ovr", average="macro")
         }
-    
+
     def run_experiments(self):
         """Main method to run all experiments"""
         # Load datasets and embeddings
@@ -201,7 +203,7 @@ class ExperimentRunner:
         y_cnnvd_numeric = y_cnnvd.map(label_mapping)
         y_cnvd_numeric = y_cnvd.map(label_mapping)
         y_variot_numeric = y_variot.map(label_mapping)
-        
+
         embedding_paths = {
             'X_train': self.config['X_train_path'],
             'X_valid': self.config['X_valid_path'],
@@ -216,17 +218,19 @@ class ExperimentRunner:
         label_mapping = {'esv': 0, 'gpsv': 1, 'ambiguous': 2}
         y_test_numeric = embeddings['y_valid'].map(label_mapping)
         # Load vuln2vec embeddings
-        vuln2vec_model = Word2Vec.load(self.config['vuln2vec_path'])
-        
+        path = kagglehub.dataset_download("aissaultimate/vuln2vec-model")
+
+        vuln2vec_model = Word2Vec.load(path+"/vuln2vec-300-vulnDBv2.model")
+
         # Main experiment loop
         for technique in tqdm(self.config['weighting_techniques'], desc='Weighting Techniques'):
             weight_matrix = self._get_weight_matrix(technique)
-            
+
             for architecture in tqdm(self.config['architectures'], desc='Architectures'):
                 for batch_size in tqdm(self.config['batch_sizes'], desc='Batch Sizes'):
                     try:
                         # Create embeddings with current weighting
-                        train_embeddings = self.create_weighted_embeddings( 
+                        train_embeddings = self.create_weighted_embeddings(
                             embeddings['X_train'],
                             embeddings['y_train'],
                             weight_matrix,
@@ -284,10 +288,10 @@ class ExperimentRunner:
                             self.config['embedding_dim'],
                             technique
                         )
-                        
+
                         # Setup directories
                         exp_dir = self._setup_directories(technique, architecture, batch_size)
-                        
+
                         # Create and train model
                         model = create_model(
                             architecture=architecture,
@@ -315,21 +319,21 @@ class ExperimentRunner:
                             'variot': (variot_embeddings, y_variot_numeric),
                         }
                         metrics = self._evaluate_model(model, test_sets, exp_dir)
-                        
+
                         # Save training history
                         pd.DataFrame(history.history).to_csv(exp_dir / 'training_history.csv')
-                        
+
                         # Store results for final report
                         self._store_results(technique, architecture, batch_size, metrics, total_time)
-                        
+
                     except Exception as e:
                         logger.error(f"Error in {technique}-{architecture}-{batch_size}: {str(e)}")
                     finally:
                         clear_gpu_memory()
-                        
+
         # Save final consolidated results
         self._save_final_report()
-    
+
     def _store_results(self, technique, architecture, batch_size, metrics, model_time):
         """Aggregate results across all experiments"""
         for test_set, values in metrics.items():
@@ -340,7 +344,7 @@ class ExperimentRunner:
             self.results['total_time'].append(model_time)
             for metric, value in values.items():
                 self.results[metric].append(value)
-                
+
     def _save_final_report(self):
         """Save all results to a consolidated CSV"""
         results_df = pd.DataFrame(self.results)
