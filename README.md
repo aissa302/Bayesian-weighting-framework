@@ -84,6 +84,18 @@ We welcome contributions! If you have ideas for improvements or find a bug, feel
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
+## Citation
+```
+@article{yahya2025bayes,
+  title={Bayes-based word weighting for enhanced vulnerability classification in critical infrastructure systems},
+  author={Yahya, Aissa Ben and El Akhal, Hicham and El Alaoui, Abdelbaki El Belrhiti and others},
+  journal={Computers \& Security},
+  pages={104451},
+  year={2025},
+  publisher={Elsevier}
+}
+```
+
 ## Contact
 
 For questions or support, please reach out to `ai.benyahya@edu.umi.ac.ma`.
